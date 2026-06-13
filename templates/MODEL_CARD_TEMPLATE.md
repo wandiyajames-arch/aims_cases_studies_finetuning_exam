@@ -32,5 +32,5 @@ An end-to-end NLP pipeline fine-tuned to act as a conversational assistant for W
 - **Hardware:** Standard CPU / T4 GPU.
 
 ## Authors
-- **Group 1:** WANDIYA James, WADE Ndeye Khady, SIGEI Charlotte, GAOLATHE Angelah, AKAKPO Sara.
+- **Group 1:** WANDIYA James, WADE Ndeye Khady, SIGEI Charlotte, GAOLATLHE Angelah, AKAKPO Sara.
 - **Course:** Applied Generative and Agentic AI, AIMS Senegal.
