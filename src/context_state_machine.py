@@ -1,4 +1,4 @@
-"""Small lexical context state machine for the Wolof demo web app."""
+"""Small lexical context state machine for the Wolof demo web app with added Safety Guardrails."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ DEFAULT_WEB_CATEGORIES = (
     "sante",
     "transport",
     "culture",
+    "language",
+    "orthography"
 )
 TOKEN_ALIASES = {
     "mathematik": "math",
@@ -33,6 +35,17 @@ TOKEN_ALIASES = {
     "wolof": "wolof",
 }
 
+# --- NEW IMPROVEMENT: SAFETY GUARDRAILS ---
+TOXIC_KEYWORDS = {"hack", "kill", "steal", "illegal", "bomb", "saaga", "merde"}
+
+def safety_check(text: str) -> tuple[bool, str]:
+    """Check if the user input contains toxic or restricted keywords."""
+    tokens = re.findall(r"\w+", text.lower(), flags=re.UNICODE)
+    for token in tokens:
+        if token in TOXIC_KEYWORDS:
+            return False, "Baal ma, kàddu gii dafa am luñu teree wax ci. (This prompt contains restricted content)."
+    return True, "Valid"
+# ------------------------------------------
 
 def tokenize(text: str) -> List[str]:
     tokens = re.findall(r"\w+", text.lower(), flags=re.UNICODE)
@@ -72,8 +85,9 @@ class CategoryContextStateMachine:
     """Retrieve in-category examples and build an augmented prompt.
 
     This is intentionally lightweight: no embeddings, no vector database, just
-    category filtering plus lexical overlap. It is useful when compute and setup
-    time are limited in class.
+    category filtering plus lexical overlap. 
+    
+    IMPROVEMENT: Added explicit safety filtering bounds before context compilation.
     """
 
     def __init__(
@@ -108,6 +122,12 @@ class CategoryContextStateMachine:
         return visible
 
     def retrieve(self, category: str, question: str, k: int = 4) -> List[Dict[str, str]]:
+        # --- NEW IMPROVEMENT: ABORT RETRIEVAL IF UNSAFE ---
+        is_safe, msg = safety_check(question)
+        if not is_safe:
+            return [] # Do not retrieve context for toxic queries
+        # --------------------------------------------------
+
         if is_all_category(category):
             rows = self.all_rows
         elif category in self.rows_by_category:
@@ -177,6 +197,12 @@ class CategoryContextStateMachine:
         question: str,
         examples: Sequence[Dict[str, str]],
     ) -> str:
+        # --- NEW IMPROVEMENT: SAFETY GUARDRAIL EXECUTION ---
+        is_safe, error_msg = safety_check(question)
+        if not is_safe:
+            return error_msg
+        # ---------------------------------------------------
+
         context = self.build_context(examples)
         return (
             "Student question:\n"
