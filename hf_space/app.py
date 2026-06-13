@@ -1,104 +1,58 @@
-"""Minimal Gradio Space for a LoRA-adapted instruction model."""
-
-from __future__ import annotations
-
-import os
 import re
-
-import gradio as gr
 import torch
+import gradio as gr
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# --- UPDATED: HARDCODED CONFIGURATION ---
-# Using your specific Hugging Face repository IDs
+# --- CONFIGURATION ---
 BASE_MODEL = "Qwen/Qwen3-0.6B"
-MODEL_REPO_ID = "wandiya39/qwen3-0.6b-wolof-lora" 
-SYSTEM_PROMPT = "You are a helpful AI assistant. Answer in clear Wolof. DO NOT use <think> tags. DO NOT reason internally."
-# ------------------------------------------
+MODEL_REPO_ID = "wandiya39/qwen3-0.6b-wolof-lora"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL | re.IGNORECASE)
-THINK_TAG_RE = re.compile(r"</?think>", flags=re.IGNORECASE)
+# Load Model
+tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, trust_remote_code=True)
+base = AutoModelForCausalLM.from_pretrained(BASE_MODEL, torch_dtype=torch.float32, trust_remote_code=True)
+model = PeftModel.from_pretrained(base, MODEL_REPO_ID).to(DEVICE).eval()
 
-def pick_dtype():
-    return torch.float32 # Safest for CPU-only Spaces
-
-def pick_device() -> str:
-    return "cuda" if torch.cuda.is_available() else "cpu"
-
-def clean_answer(text: str) -> str:
-    text = THINK_BLOCK_RE.sub("", text)
-    text = THINK_TAG_RE.sub("", text)
-    return text.strip()
-
-def load_model():
-    print(f"Loading tokenizer and model from {MODEL_REPO_ID}...")
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, trust_remote_code=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    base = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
-        torch_dtype=pick_dtype(),
-        trust_remote_code=True,
-    )
+def translate_engine(text, mode):
+    if not text.strip(): return ""
     
-    # Load your LoRA adapter
-    model = PeftModel.from_pretrained(base, MODEL_REPO_ID)
-    model.eval()
-    return model.to(pick_device()), tokenizer
-
-# Load globally
-MODEL, TOKENIZER = load_model()
-DEVICE = pick_device()
-
-def render_prompt(user_message: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_message.strip()},
-    ]
-    return TOKENIZER.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-
-def generate(user_message: str, max_new_tokens: int, temperature: float) -> str:
-    if not user_message.strip():
-        return "Please enter a prompt."
-
-    prompt = render_prompt(user_message)
-    inputs = TOKENIZER(prompt, return_tensors="pt").to(DEVICE)
+    # SYSTEM ORCHESTRATION: Force the model into 'Translator' role
+    # We explicitly define the task boundaries here.
+    lang_task = "Wolof" if mode == "English to Wolof" else "English"
+    prompt = f"<|im_start|>system\nYou are a professional translator. Convert input text to {lang_task}. Do not repeat the input. Return only the translated text.<|im_end|>\n<|im_start|>user\n{text}<|im_end|>\n<|im_start|>assistant\n"
     
-    kwargs = {
-        "max_new_tokens": int(max_new_tokens),
-        "do_sample": temperature > 0,
-        "pad_token_id": TOKENIZER.eos_token_id,
-        "repetition_penalty": 1.15,
-        "no_repeat_ngram_size": 3,
-    }
-    if kwargs["do_sample"]:
-        kwargs["temperature"] = float(temperature)
-        kwargs["top_p"] = 0.9
-
+    inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
+    
+    # Inference parameters: Low temperature = Fact-based, High repetition penalty = No mirroring
     with torch.no_grad():
-        output_ids = MODEL.generate(**inputs, **kwargs)
+        outputs = model.generate(
+            **inputs, 
+            max_new_tokens=150, 
+            repetition_penalty=1.5, 
+            temperature=0.1, 
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id
+        )
     
-    generated = output_ids[0, inputs["input_ids"].shape[-1] :]
-    return clean_answer(TOKENIZER.decode(generated, skip_special_tokens=True))
+    # Decode and Scrub
+    response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
+    return re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL | re.IGNORECASE).strip()
 
-# Gradio Interface
-demo = gr.Interface(
-    fn=generate,
-    inputs=[
-        gr.Textbox(label="Wolof Assistant Prompt", lines=3),
-        gr.Slider(16, 256, value=128, step=8, label="Max new tokens"),
-        gr.Slider(0.0, 1.0, value=0.3, step=0.05, label="Temperature"),
-    ],
-    outputs=gr.Textbox(label="Wolof Assistant Response", lines=6),
-    title="Wolof AI Assistant (LoRA-Adapted)",
-    description="Fine-tuned Qwen-0.6B assistant for Wolof language and Senegalese context."
-)
+# --- PROFESSIONAL UI ---
+with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    gr.Markdown("# 🚀 Wolof-English Translation Engine")
+    
+    with gr.Row():
+        with gr.Column():
+            input_box = gr.Textbox(label="Source Text", lines=8, placeholder="Enter text here...")
+            direction = gr.Radio(["English to Wolof", "Wolof to English"], label="Translation Direction", value="English to Wolof")
+            submit = gr.Button("Execute Translation", variant="primary")
+        
+        with gr.Column():
+            output_box = gr.Textbox(label="AI-Generated Output", lines=8, interactive=False)
+
+    submit.click(fn=translate_engine, inputs=[input_box, direction], outputs=output_box)
 
 if __name__ == "__main__":
     demo.launch()
