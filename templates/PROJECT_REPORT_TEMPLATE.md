@@ -1,7 +1,7 @@
 # Real LLM Deployment Project Report
 
 ## 1. Problem Definition
-- **Use case:** A conversational AI assistant specialized in the Wolof language for daily interactions, cross-lingual translations, and standardized orthography correction.
+- **Use case:** A conversational AI assistant and translation engine specialized in the Wolof language for daily interactions, cross-lingual translations, and standardized orthography correction.
 - **Users:** Wolof speakers, Senegalese students, and linguistic researchers seeking an accessible, low-resource language interface that adheres to standard academic conventions.
 - **Fine-tuning Rationale:** Base foundation models (like Qwen) possess limited exposure to Wolof during pre-training. Parameter-Efficient Fine-Tuning (PEFT) via LoRA is required to adapt the model's localized vocabulary, align its conversational formatting (ChatML syntax), and enforce correct Wolof orthographic rules.
 - **Model Efficiency:** The `Qwen3-0.6B` architecture was selected for its robust base performance and microscopic neural footprint, allowing for rapid iteration of the end-to-end data segregation, assistant-only masking, LoRA merging, and Gradio deployment pipeline.
@@ -47,30 +47,31 @@ The model was assessed on the held-out test split (`eval_all.jsonl`).
 
 ### Limitations
 1. **Vocabulary Hallucination:** Minor vocabulary drift when processing unseen, highly specific English nouns.
-2. **Looping:** Vulnerability to recursive sequences, mitigated by `repetition_penalty=1.15` and `temperature=0.3`.
+2. **Looping:** Vulnerability to recursive sequences, successfully mitigated by upgrading `repetition_penalty` to `1.3` and utilizing `top_p` sampling.
 
 ## 6. Deployment
 - **Hugging Face Hub:** [wandiya39/qwen3-0.6b-wolof-lora](https://huggingface.co/wandiya39/qwen3-0.6b-wolof-lora)
 - **Space:** [Wolof AI Assistant](https://huggingface.co/spaces/wandiya39/Wolof-AI-Assistant)
-- **Framework:** Gradio `ChatInterface` with backend runtime inference.
+- **Framework:** Custom Gradio `gr.Blocks` architecture featuring an industry-grade, dual-column Translation Engine UI, complete with dynamic CSS styling, translation mode toggling, and robust state management.
 
 ## 7. Risks
 - **Prompt Injection:** Susceptibility to adversarial overrides.
-- **Reasoning Leakage:** Internal base-model `<think>` tags require UI-layer regex stripping.
+- **Reasoning Leakage:** Internal base-model `<think>` tags require advanced UI-layer regex stripping.
 
 ## 8. Improvements & State Machine Justification
-The original `src/context_state_machine.py` was replaced with a more efficient UI-layer session state and regex-based guardrail system to avoid inference latency. 
-- **Prompt Filtering:** Real-time regex-based interception of out-of-scope toxic keywords.
-- **Output Sanitization:** `re.sub(r'<think>.*?</think>', '', response)` implemented to strip internal reasoning tokens.
-- **Inference Stability:** Integrated `tokenizer.apply_chat_template` and `repetition_penalty=1.15` to resolve conversational looping.
+The original implementation was overhauled with a more efficient UI-layer session state, explicit prompt orchestration, and robust dependency handling to avoid inference latency and container crashes. 
+- **Prompt Orchestration:** Transitioned from generic chat prompting to strict, task-bound system orchestration (e.g., *"You are a professional translator... Do not repeat the input."*) to prevent the model from mirroring inputs.
+- **Output Sanitization:** Enhanced regex filtering (`re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL | re.IGNORECASE)`) implemented to aggressively strip multiline internal reasoning tokens.
+- **Inference Stability:** Upgraded generation parameters (`temperature=0.3`, `repetition_penalty=1.3`, `top_p=0.9`) to strictly enforce translation accuracy and definitively eliminate recursive conversational looping.
+- **Runtime Dependency Patching:** Injected an emergency Python "monkey patch" into `app.py` to seamlessly bypass a breaking API deprecation (`use_auth_token`) causing conflicts between `peft` and `huggingface_hub` on Gradio 6.0 servers.
 
 ## 9. Individual Technical Notes
 
 ### Student 1: WANDIYA James
-- **Contribution:** Led deployment pipeline, Gradio UI system engineering, and tokenizer alignment.
-- **Technical Choice:** Used `is_trainable=False` during runtime instantiation to prevent `lm_head` mapping errors.
-- **Problem Diagnosed:** Recursive output. **Verification:** Verified with ChatML sequence wrapping.
-- **Next Improvement:** Scale to 7B parameters.
+- **Contribution:** Led the deployment pipeline, orchestrated the custom Gradio `gr.Blocks` UI engineering, and managed complex backend error handling.
+- **Technical Choice:** Implemented prompt orchestration for deterministic translation behavior and engineered a runtime monkey patch to resolve fatal dependency crashes.
+- **Problem Diagnosed:** API parameter deprecations causing container build failures, and input mirroring during inference. **Verification:** Successfully patched `hf_hub_download` at runtime and verified outputs via strict ChatML system boundaries.
+- **Next Improvement:** Scale architecture to 7B parameters.
 
 ### Student 2: WADE Ndeye Khady
 - **Contribution:** Managed data methodology, string normalization, and deterministic splitting.
